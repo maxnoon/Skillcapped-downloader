@@ -96,7 +96,6 @@
     document.head.appendChild(s);
   }
 
-  // ── Playlist ─────────────────────────────────────────────────────────
   var playlistCache = {};
   function getPlaylistUrl(id, res) {
     return CDN + "/" + id + "/HIDDEN" + (res || currentRes) + ".m3u8";
@@ -157,7 +156,6 @@
     }
   }
 
-  // ── Segment downloading ─────────────────────────────────────────────
   function fetchSegment(url, retries) {
     return new Promise(function (resolve) {
       var a = 0;
@@ -218,7 +216,6 @@
     }, 10000);
   }
 
-  // ── mux.js ──────────────────────────────────────────────────────────
   var muxReady = false;
   function loadMux(cb) {
     if (muxReady && typeof unsafeWindow !== "undefined" && unsafeWindow.muxjs)
@@ -278,7 +275,6 @@
     });
   }
 
-  // ── HLS.js (loaded via @require) ───────────────────────────────────
   function loadHls(cb) {
     cb();
   }
@@ -286,7 +282,6 @@
     return typeof Hls !== "undefined" ? Hls : null;
   }
 
-  // #3 — HLS error recovery helper
   function attachHlsErrorRecovery(hls, H, titleSpan, filename) {
     hls.on(H.Events.ERROR, function (ev, data) {
       if (!data || !data.fatal) return;
@@ -407,7 +402,6 @@
     };
   };
 
-  // ── localStorage ────────────────────────────────────────────────────
   function savePosition(id, t) {
     try {
       localStorage.setItem("sc-pos-" + id, String(t));
@@ -477,7 +471,6 @@
       localStorage.setItem("sc-vol", String(v));
     } catch (e) {}
   }
-  // #6 — auto-next preference
   function getAutoNextEnabled() {
     try {
       return localStorage.getItem("sc-autonext") !== "0";
@@ -491,7 +484,6 @@
     } catch (e) {}
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────
   function showToast(parent, text, cls, dur) {
     var t = document.createElement("div");
     t.className = cls || "sc-dl-toast";
@@ -507,7 +499,7 @@
       (dur || 1500) + 600,
     );
   }
-  // #5 — generalized adjacent video finder
+
   function getAdjacentVideo(offset) {
     var cards = document.querySelectorAll(
         '[data-name="CourseOverviewVidCard"]',
@@ -565,7 +557,7 @@
       ? h + ":" + (m < 10 ? "0" : "") + m + ":" + ps + s
       : m + ":" + ps + s;
   }
-  // #1 — clean ETA formatter
+
   function formatEta(sec) {
     if (sec < 60) return sec + "s";
     return (
@@ -615,7 +607,6 @@
     return null;
   }
 
-  // ── Streaming HLS player ────────────────────────────────────────────
   function showHlsPlayer(videoId, filename) {
     var existing = document.querySelector(".sc-dl-overlay");
     if (existing) existing.remove();
@@ -638,7 +629,6 @@
     var titleSpan = document.createElement("span");
     titleSpan.textContent = filename;
 
-    // Speed buttons
     var speedGroup = document.createElement("div");
     speedGroup.className = "sc-dl-player-actions";
     var speedBtns = [],
@@ -662,7 +652,6 @@
       })(SPEEDS[si]);
     }
 
-    // Quality buttons
     var qualGroup = document.createElement("div");
     qualGroup.className = "sc-dl-player-actions";
     var qualBtns = [],
@@ -723,7 +712,6 @@
       if (available.length > 1) buildQualityButtons(available);
     });
 
-    // Actions
     var actions = document.createElement("div");
     actions.className = "sc-dl-player-actions";
     var pipBtn = document.createElement("button");
@@ -737,7 +725,6 @@
           video.requestPictureInPicture().catch(function () {});
     };
 
-    // #6 — auto-next toggle button
     var autoBtn = document.createElement("button");
     autoBtn.className = "sc-dl-speed-btn";
     autoBtn.textContent = getAutoNextEnabled() ? "Auto \u2713" : "Auto \u2717";
@@ -748,7 +735,6 @@
       autoBtn.textContent = enabled ? "Auto \u2713" : "Auto \u2717";
     };
 
-    // Download dropdown
     var downloadDrop = document.createElement("div");
     downloadDrop.className = "sc-dl-dropdown";
     var downloadBtn = document.createElement("button");
@@ -782,13 +768,11 @@
     downloadDrop.appendChild(downloadMenu);
     downloadDrop.appendChild(downloadBtn);
 
-    // #2 — named listener for cleanup
     function closeDropdown() {
       downloadDrop.className = "sc-dl-dropdown";
     }
     document.addEventListener("click", closeDropdown);
 
-    // Close button
     var closeBtn = document.createElement("button");
     closeBtn.className = "sc-dl-close-btn";
     closeBtn.textContent = "\u2715 Close";
@@ -834,7 +818,6 @@
       if (e.target === overlay) closeBtn.click();
     });
 
-    // #5 — keyboard shortcuts with N/P for next/prev
     function keyHandler(e) {
       if (!document.querySelector(".sc-dl-overlay")) {
         document.removeEventListener("keydown", keyHandler);
@@ -905,7 +888,6 @@
     }
     document.addEventListener("keydown", keyHandler);
 
-    // ── Stream it ───────────────────────────────────────────────
     var savedPos = getPosition(videoId);
     fetchPlaylist(videoId)
       .then(function (pl) {
@@ -942,7 +924,6 @@
           }
         });
 
-        // #6 — auto-next respects preference
         video.addEventListener("ended", function () {
           clearPosition(videoId);
           markWatched(videoId);
@@ -1006,7 +987,6 @@
               }
               video.play().catch(function () {});
               URL.revokeObjectURL(m3u8Url);
-              // #9 — prefetch next video playlist (safe: title mapping only, no card click)
               var nextInfo = getNextVideo();
               if (nextInfo) {
                 var nextId = getIdFromTitle(nextInfo.title);
@@ -1039,8 +1019,6 @@
       });
   }
 
-  // ── Download ─────────────────────────────────────────────────────────
-  // #1 — fixed ETA calculation
   function startDownload(videoId, btn, format) {
     var baseName = getVideoTitle() || videoId,
       ext = format === "mp4" ? ".mp4" : ".ts",
@@ -1140,7 +1118,6 @@
       });
   }
 
-  // ── Bulk download ───────────────────────────────────────────────────
   var bulkRunning = false;
   function startBulkDownload(btn) {
     if (bulkRunning) return;
@@ -1262,7 +1239,6 @@
     }
   }
 
-  // #10 — session progress indicator
   function updateCourseProgressLabel() {
     var cards = document.querySelectorAll(
       '[data-name="CourseOverviewVidCard"]',
@@ -1296,7 +1272,6 @@
         : "";
   }
 
-  // ── UI buttons ──────────────────────────────────────────────────────
   function addFixedButton() {
     var old = document.querySelectorAll(".sc-dl-btn--fixed");
     for (var i = 0; i < old.length; i++) old[i].remove();
@@ -1323,7 +1298,6 @@
       .catch(function () {});
   }
 
-  // #8 — inline buttons extract title from row, not page
   function addInlineButtons() {
     var rows = document.querySelectorAll(
       'div[data-name="BrVid Row Parent Course"]',
@@ -1384,7 +1358,6 @@
     }
   }
 
-  // ── Init ─────────────────────────────────────────────────────────────
   function debounce(fn, ms) {
     var t;
     return function () {
