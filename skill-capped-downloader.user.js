@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Skill-Capped Video Downloader
 // @namespace   http://tampermonkey.net/
-// @version     10.2
+// @version     10.3
 // @description Adds a better video player and downloader for Skill-Capped / Skill Capped League of Legends courses, with HLS playback, MP4/TS downloads, bulk course download, resume, auto-next, PiP, speed controls, and quality selection.
 // @author      Max
 // @match       https://www.skill-capped.com/*
