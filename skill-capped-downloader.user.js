@@ -174,34 +174,47 @@
     return fetchPlaylist(videoId).then(function (pl) {
       var urls = pl.urls,
         total = urls.length,
-        chunks = [],
+        chunks = new Array(total),
         bytes = 0,
         done = 0,
-        t0 = Date.now();
-      function batch(s) {
-        if (s >= total) return Promise.resolve(chunks);
-        var e = Math.min(s + CONCURRENCY, total);
-        return Promise.all(
-          urls.slice(s, e).map(function (u) {
-            return fetchSegment(u, MAX_RETRIES);
-          }),
-        ).then(function (res) {
-          for (var j = 0; j < res.length; j++)
-            if (res[j]) {
-              chunks.push(res[j]);
-              bytes += res[j].byteLength;
-              done++;
-            }
-          onProgress(
-            done,
-            total,
-            bytes,
-            bytes / ((Date.now() - t0) / 1000) / 1048576,
-          );
-          return batch(e);
-        });
-      }
-      return batch(0);
+        t0 = Date.now(),
+        idx = 0,
+        settled = 0,
+        inFlight = 0;
+      if (!total) return Promise.resolve([]);
+      return new Promise(function (resolve) {
+        function next() {
+          while (inFlight < CONCURRENCY && idx < total) {
+            var i = idx++;
+            inFlight++;
+            fetchSegment(urls[i], MAX_RETRIES)
+              .then(function (buf) {
+                if (buf) {
+                  chunks[i] = buf;
+                  bytes += buf.byteLength;
+                  done++;
+                }
+                settled++;
+                inFlight--;
+                onProgress(
+                  done,
+                  total,
+                  bytes,
+                  bytes / ((Date.now() - t0) / 1000) / 1048576,
+                );
+                if (settled === total) resolve(chunks.filter(Boolean));
+                else next();
+              })
+              .catch(function () {
+                settled++;
+                inFlight--;
+                if (settled === total) resolve(chunks.filter(Boolean));
+                else next();
+              });
+          }
+        }
+        next();
+      });
     });
   }
   function saveBlob(blob, name) {
@@ -689,7 +702,7 @@
               var url = URL.createObjectURL(blob);
               var H = getHls();
               if (H && H.isSupported()) {
-                hlsInstance = new H({ enableWorker: false, loader: GMLoader });
+                hlsInstance = new H({ loader: GMLoader });
                 hlsInstance.loadSource(url);
                 hlsInstance.attachMedia(video);
                 hlsInstance.on(H.Events.MANIFEST_PARSED, function () {
@@ -977,7 +990,7 @@
         loadHls(function () {
           var H = getHls();
           if (H && H.isSupported()) {
-            hlsInstance = new H({ enableWorker: false, loader: GMLoader });
+            hlsInstance = new H({ loader: GMLoader });
             hlsInstance.loadSource(m3u8Url);
             hlsInstance.attachMedia(video);
             hlsInstance.on(H.Events.MANIFEST_PARSED, function () {
@@ -995,6 +1008,7 @@
             });
             attachHlsErrorRecovery(hlsInstance, H, titleSpan, filename); // #3
           } else if (video.canPlayType("application/vnd.apple.mpegURL")) {
+            URL.revokeObjectURL(m3u8Url);
             video.src = getPlaylistUrl(videoId);
             if (savedPos > 5)
               video.addEventListener(
@@ -1007,6 +1021,7 @@
               );
             video.play().catch(function () {});
           } else {
+            URL.revokeObjectURL(m3u8Url);
             loadingDiv.textContent = "HLS not supported.";
             player.insertBefore(loadingDiv, video);
             player.removeChild(video);
@@ -1376,18 +1391,12 @@
     injectStyles();
     refresh();
     var lastUrl = location.href;
-    var debouncedRefresh = debounce(function () {
+    var debouncedObserver = debounce(function () {
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         setTimeout(refresh, 1200);
         setTimeout(refresh, 2500);
       }
-    }, 200);
-    new MutationObserver(debouncedRefresh).observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-    var debouncedDom = debounce(function () {
       addInlineButtons();
       addBulkButton();
       var pe = !!document.querySelector('[data-name="Video Player Container"]'),
@@ -1398,7 +1407,7 @@
         for (var i = 0; i < bb.length; i++) bb[i].remove();
       }
     }, 200);
-    new MutationObserver(debouncedDom).observe(document.body, {
+    new MutationObserver(debouncedObserver).observe(document.body, {
       childList: true,
       subtree: true,
     });
