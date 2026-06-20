@@ -539,3 +539,9 @@ The batch download approach was superseded by the sliding-window fetcher in v10.
 ### Memory
 
 * **Playlist cache eviction** — `playlistCache` previously grew without bound; now capped at 50 entries using insertion-order eviction (oldest entry removed when the limit is exceeded); a session browsing 20 videos at 3 qualities each previously retained up to ~9MB of parsed playlist strings indefinitely
+
+---
+
+## v11.1 — Bug Fixes
+
+* Fixed floating action button position overlapping the site's back button

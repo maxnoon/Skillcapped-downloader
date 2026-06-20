@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        Skill-Capped Video Downloader test
+// @name        Skill-Capped Video Downloader testyuuu
 // @namespace   http://tampermonkey.net/
-// @version     11.0
+// @version     11.1
 // @description Redesigned player UI: floating mini-player bar, glassmorphic overlay, rich episode sidebar, keyboard shortcuts HUD, quality/speed controls, PiP, bulk download, resume — all in a cohesive dark UI.
 // @author      Max
 // @match       https://www.skill-capped.com/*
@@ -69,14 +69,14 @@
       .sc-fab {
         position: fixed;
         top: 14px;
-        left: 14px;
+        left: 50px;
         z-index: 2147483647;
         display: flex;
         align-items: center;
         gap: 0;
         background: var(--sc-bg1);
         border: 1px solid var(--sc-border2);
-        border-radius: 28px;
+        border-radius: 40px;
         box-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 0 1px var(--sc-border);
         overflow: hidden;
         font-family: var(--sc-font);
