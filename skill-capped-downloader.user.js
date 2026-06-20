@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name        Skill-Capped Video Downloader testyuuu
+// @name        Skill-Capped Video Downloader
 // @namespace   http://tampermonkey.net/
-// @version     11.1
+// @version     11.2
 // @description Redesigned player UI: floating mini-player bar, glassmorphic overlay, rich episode sidebar, keyboard shortcuts HUD, quality/speed controls, PiP, bulk download, resume — all in a cohesive dark UI.
 // @author      Max
 // @match       https://www.skill-capped.com/*
@@ -76,7 +76,7 @@
         gap: 0;
         background: var(--sc-bg1);
         border: 1px solid var(--sc-border2);
-        border-radius: 40px;
+        border-radius: 28px;
         box-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 0 1px var(--sc-border);
         overflow: hidden;
         font-family: var(--sc-font);
@@ -1356,7 +1356,7 @@
   /* ─────────────────────────────────────────────
      EPISODE SIDEBAR BUILDER
   ───────────────────────────────────────────── */
-  function buildSidebar(activeId) {
+  function buildSidebar(activeId, onSwitch) {
     var sidebar = document.createElement("div");
     sidebar.className = "sc-sidebar";
 
@@ -1386,6 +1386,16 @@
         card: cards[i],
       });
     }
+
+    /* Allow external code to highlight the active card */
+    sidebar._setActive = function (newId) {
+      list.querySelectorAll(".sc-ep-card").forEach(function (c) {
+        var isActive = c.dataset.vid === newId;
+        c.classList.toggle("active", isActive);
+        if (isActive)
+          c.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+    };
 
     var header = document.createElement("div");
     header.className = "sc-sidebar-header";
@@ -1503,21 +1513,29 @@
         card.appendChild(body);
         card.appendChild(playIcon);
 
+        card.dataset.vid = ep.vid || "";
         card.addEventListener("click", function () {
-          ep.card.click();
-          var c = 0,
-            iv = setInterval(function () {
-              c++;
-              var nid = getVideoIdFromThumbnail() || getVideoIdFromUrl();
-              if (nid && c > 2) {
-                clearInterval(iv);
-                setTimeout(function () {
-                  var title = getVideoTitle() || ep.title;
-                  showPlayer(nid, title);
-                }, 500);
-              }
-              if (c > 20) clearInterval(iv);
-            }, 500);
+          if (ep.vid && onSwitch) {
+            /* Switch video in-place — no page navigation, no overlay teardown */
+            onSwitch(ep.vid, ep.title);
+          } else {
+            /* Fallback: navigate the page then reopen (vid id not yet known) */
+            ep.card.click();
+            var c = 0,
+              iv = setInterval(function () {
+                c++;
+                var nid = getVideoIdFromThumbnail() || getVideoIdFromUrl();
+                if (nid && c > 2) {
+                  clearInterval(iv);
+                  setTimeout(function () {
+                    var title = getVideoTitle() || ep.title;
+                    if (onSwitch) onSwitch(nid, title);
+                    else showPlayer(nid, title);
+                  }, 500);
+                }
+                if (c > 20) clearInterval(iv);
+              }, 500);
+          }
         });
 
         list.appendChild(card);
@@ -1564,6 +1582,9 @@
     var existing = document.querySelector(".sc-overlay");
     if (existing) existing.remove();
     mapTitle(filename, videoId);
+
+    /* Track current video so loadVideo can save position before switching */
+    var currentVideoId = videoId;
 
     /* Shell */
     var overlay = document.createElement("div");
@@ -1700,8 +1721,12 @@
     prevBtn.addEventListener("click", function () {
       var pv = getAdjacentVideo(-1);
       if (pv) {
-        closeBtn.click();
-        navigateAndPlay(pv.card);
+        var pid = idFromTitle(pv.title);
+        if (pid) loadVideo(pid, pv.title);
+        else {
+          doClose();
+          navigateAndPlay(pv.card);
+        }
       }
     });
 
@@ -1713,8 +1738,12 @@
     nextBtn.addEventListener("click", function () {
       var nv = getAdjacentVideo(1);
       if (nv) {
-        closeBtn.click();
-        navigateAndPlay(nv.card);
+        var nid = idFromTitle(nv.title);
+        if (nid) loadVideo(nid, nv.title);
+        else {
+          doClose();
+          navigateAndPlay(nv.card);
+        }
       }
     });
 
@@ -1972,8 +2001,124 @@
     videoPane.appendChild(controls);
     content.appendChild(videoPane);
 
-    /* Sidebar */
-    var sidebar = buildSidebar(videoId);
+    /* ── loadVideo: swap content in-place, no overlay teardown ── */
+    function loadVideo(newId, newTitle) {
+      /* Save position of whatever is currently playing */
+      if (
+        video.currentTime > 5 &&
+        video.duration &&
+        video.currentTime < video.duration - 5
+      )
+        savePos(currentVideoId, video.currentTime);
+      else if (video.duration) clearPos(currentVideoId);
+      if (video.duration > 0) store("sc-dur-" + currentVideoId, video.duration);
+
+      currentVideoId = newId;
+      mapTitle(newTitle, newId);
+
+      /* Cancel any auto-next countdown */
+      if (autoNextTimer) {
+        clearInterval(autoNextTimer);
+        autoNextTimer = null;
+      }
+      var an = videoWrap.querySelector(".sc-autonext");
+      if (an) an.remove();
+
+      /* Tear down old HLS */
+      video.pause();
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+      video.removeAttribute("src");
+
+      /* Show spinner */
+      var spinner = document.createElement("div");
+      spinner.className = "sc-loading";
+      spinner.innerHTML =
+        '<div class="sc-spinner"></div><div class="sc-loading-text">Loading…</div>';
+      videoWrap.appendChild(spinner);
+
+      /* Update topbar title */
+      epTitle.textContent = newTitle;
+      progressFill.style.width = "0%";
+      timeDisplay.textContent = "0:00 / 0:00";
+
+      /* Highlight sidebar */
+      if (sidebar._setActive) sidebar._setActive(newId);
+
+      /* Also click the real SC card in the background so their state updates */
+      var cards = document.querySelectorAll(
+        '[data-name="CourseOverviewVidCard"]',
+      );
+      for (var ci = 0; ci < cards.length; ci++) {
+        var td = cards[ci].querySelector(
+          'div[style*="font-weight: bold"][style*="font-size: 16px"]',
+        );
+        if (td && sanitize(td.textContent.trim()) === sanitize(newTitle)) {
+          cards[ci].click();
+          break;
+        }
+      }
+
+      var savedPos = getPos(newId);
+      fetchPlaylist(newId)
+        .then(function (pl) {
+          if (spinner.parentNode) videoWrap.removeChild(spinner);
+          if (!pl.urls.length) {
+            return;
+          }
+          if (pl.duration > 0) {
+            store("sc-dur-" + newId, pl.duration);
+            epTitle.textContent = newTitle + " · " + formatTime(pl.duration);
+          }
+          var m3u8Blob = new Blob([pl.m3u8Text], {
+            type: "application/vnd.apple.mpegurl",
+          });
+          var m3u8Url = URL.createObjectURL(m3u8Blob);
+          video.volume = getSavedVol();
+          video.playbackRate = getSavedSpeed();
+          var H = getHls();
+          if (H && H.isSupported()) {
+            hlsInstance = new H({ loader: GMLoader });
+            hlsInstance.loadSource(m3u8Url);
+            hlsInstance.attachMedia(video);
+            hlsInstance.on(H.Events.MANIFEST_PARSED, function () {
+              if (savedPos > 5) {
+                video.currentTime = savedPos;
+                toast(
+                  videoWrap,
+                  "Resumed from " + formatTime(savedPos),
+                  true,
+                  2000,
+                );
+              }
+              video.play().catch(function () {});
+              URL.revokeObjectURL(m3u8Url);
+            });
+            attachHlsErrors(hlsInstance, H);
+          } else if (video.canPlayType("application/vnd.apple.mpegURL")) {
+            URL.revokeObjectURL(m3u8Url);
+            video.src = playlistUrl(newId);
+            if (savedPos > 5)
+              video.addEventListener(
+                "loadedmetadata",
+                function () {
+                  video.currentTime = savedPos;
+                },
+                { once: true },
+              );
+            video.play().catch(function () {});
+          }
+        })
+        .catch(function (err) {
+          if (spinner.parentNode) videoWrap.removeChild(spinner);
+          toast(videoWrap, "Error: " + err.message, true, 3000);
+        });
+    }
+
+    /* Sidebar — pass loadVideo as the switch callback */
+    var sidebar = buildSidebar(videoId, loadVideo);
     content.appendChild(sidebar);
 
     player.appendChild(content);
@@ -2020,9 +2165,9 @@
         video.duration &&
         video.currentTime < video.duration - 5
       )
-        savePos(videoId, video.currentTime);
-      else if (video.duration) clearPos(videoId);
-      if (video.duration > 0) store("sc-dur-" + videoId, video.duration);
+        savePos(currentVideoId, video.currentTime);
+      else if (video.duration) clearPos(currentVideoId);
+      if (video.duration > 0) store("sc-dur-" + currentVideoId, video.duration);
       video.pause();
       if (hlsInstance) {
         hlsInstance.destroy();
@@ -2120,16 +2265,24 @@
       if (e.key === "n" || e.key === "N") {
         var nv = getAdjacentVideo(1);
         if (nv) {
-          doClose();
-          navigateAndPlay(nv.card);
+          var nid = idFromTitle(nv.title);
+          if (nid) loadVideo(nid, nv.title);
+          else {
+            doClose();
+            navigateAndPlay(nv.card);
+          }
         }
         return;
       }
       if (e.key === "p" || e.key === "P") {
         var pv = getAdjacentVideo(-1);
         if (pv) {
-          doClose();
-          navigateAndPlay(pv.card);
+          var pid = idFromTitle(pv.title);
+          if (pid) loadVideo(pid, pv.title);
+          else {
+            doClose();
+            navigateAndPlay(pv.card);
+          }
         }
         return;
       }
@@ -2176,15 +2329,15 @@
           var now = Date.now();
           if (now - lastSave > 3000 && video.currentTime > 5) {
             lastSave = now;
-            savePos(videoId, video.currentTime);
+            savePos(currentVideoId, video.currentTime);
           }
         });
 
         /* Auto-next on ended */
         video.addEventListener("ended", function () {
-          clearPos(videoId);
-          markWatched(videoId);
-          store("sc-dur-" + videoId, video.duration);
+          clearPos(currentVideoId);
+          markWatched(currentVideoId);
+          store("sc-dur-" + currentVideoId, video.duration);
           updateSidebarDots();
           updateCourseProgressLabel();
           if (!getAutoNext()) return;
@@ -2220,8 +2373,12 @@
               clearInterval(autoNextTimer);
               autoNextTimer = null;
             }
-            doClose();
-            navigateAndPlay(next.card);
+            var gnid = idFromTitle(next.title);
+            if (gnid) loadVideo(gnid, next.title);
+            else {
+              doClose();
+              navigateAndPlay(next.card);
+            }
           }
           anPlay.addEventListener("click", goNext);
           anSkip.addEventListener("click", function () {

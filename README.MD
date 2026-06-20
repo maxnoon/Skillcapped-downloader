@@ -545,3 +545,10 @@ The batch download approach was superseded by the sliding-window fetcher in v10.
 ## v11.1 — Bug Fixes
 
 * Fixed floating action button position overlapping the site's back button
+
+---
+
+## v11.2 — In-Place Video Swap
+
+* Episode navigation no longer tears down and rebuilds the player overlay — when moving to the next or previous episode the video source is swapped in-place, keeping the overlay, controls, and state intact
+* Eliminates the visible flash and layout shift that occurred when the overlay was destroyed and recreated on each episode change
