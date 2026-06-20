@@ -92,10 +92,14 @@ Example:
 ### Performance
 
 * Playlist results cached to avoid duplicate network requests
-* MutationObservers debounced to reduce DOM query overhead
+* Single MutationObserver with debouncing covers all DOM update logic
 * mux.js loaded lazily only when MP4 download is used
 * hls.js loaded via `@require` for reliable userscript sandbox loading
 * Downloads run separately from playback
+* HLS.js demuxing runs on the main thread (`enableWorker: false` required — custom loader uses `GM_xmlhttpRequest`, unavailable in workers)
+* Sliding-window segment fetcher keeps all download slots filled at all times
+* Progress UI updates throttled to 4/second to avoid DOM thrashing during downloads
+* Playlist cache capped at 50 entries with LRU eviction
 
 ## Search Keywords
 
@@ -494,3 +498,44 @@ hls.js now loads into the userscript sandbox at install time instead of through 
 * Dropped `@connect cdn.jsdelivr.net`
 * Dropped `hlsReady` state tracking
 
+---
+
+## v10.2 — Batch Concurrent Downloading
+
+* Replaced sequential segment downloading with parallel batch fetching
+* Added configurable concurrency (`CONCURRENCY = 6`): up to 6 segments fetched simultaneously per batch
+* Batches waited for all slots to finish before starting the next group
+* Set `enableWorker: false` on HLS.js instances — required because the custom `GMLoader` uses `GM_xmlhttpRequest`, which is only available in the Tampermonkey main thread and not accessible inside a Web Worker
+
+The batch download approach was superseded by the sliding-window fetcher in v10.3. The `enableWorker: false` flag is kept permanently.
+
+---
+
+## v10.3 — Performance Optimizations
+
+### Download Engine
+
+* **Sliding-window segment fetcher** — replaced the v10.2 batch-wait model with a work queue that keeps exactly `CONCURRENCY` (6) slots filled at all times; a new request is dispatched the moment any slot finishes instead of waiting for the slowest segment in a batch
+* Fixed a `var` closure bug in the new fetcher that would have silently corrupted segment ordering when requests completed out of order
+
+### Player
+
+* `enableWorker: false` kept — the custom `GMLoader` relies on `GM_xmlhttpRequest`, which is only available in the Tampermonkey main thread and cannot run inside a Web Worker
+* Fixed blob URL leak — `URL.createObjectURL` result was not revoked in the native HLS fallback path or the unsupported-browser path; both now revoke immediately
+
+### DOM
+
+* **Single MutationObserver** — merged two observers (both watching `document.body` with `childList + subtree`) into one, halving the number of callbacks fired per DOM mutation
+
+---
+
+## v11.0 — Memory & UI Responsiveness
+
+### Downloads
+
+* **Throttled progress updates** — download progress UI now updates at most every 250ms (≈4 times/second) instead of on every segment completion; with 300–500 segments per video and `CONCURRENCY = 6`, this eliminates DOM thrashing and layout jank during active downloads; the final segment always forces an immediate update
+* **Faster blob URL revocation** — `URL.revokeObjectURL` in `saveBlob` now fires after 100ms instead of 10 seconds; the browser queues the download synchronously on `a.click()` so the object URL is no longer needed after a few hundred milliseconds; for large video files (100MB+) this frees memory nearly 10 seconds sooner per download
+
+### Memory
+
+* **Playlist cache eviction** — `playlistCache` previously grew without bound; now capped at 50 entries using insertion-order eviction (oldest entry removed when the limit is exceeded); a session browsing 20 videos at 3 qualities each previously retained up to ~9MB of parsed playlist strings indefinitely
