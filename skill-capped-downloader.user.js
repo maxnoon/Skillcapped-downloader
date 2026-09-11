@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name        Skill-Capped Video Downloader
 // @namespace   http://tampermonkey.net/
-// @version     11.2
-// @description Redesigned player UI: floating mini-player bar, glassmorphic overlay, rich episode sidebar, keyboard shortcuts HUD, quality/speed controls, PiP, bulk download, resume — all in a cohesive dark UI.
+// @version     12.0
+// @description Adapted to Skill-Capped's 2026 site redesign (data-name attributes replaced with hashed CSS-in-JS classes and new syllabus/course-card markup): floating mini-player bar, glassmorphic overlay, rich episode sidebar, keyboard shortcuts HUD, quality/speed controls, PiP, bulk download, resume — all in a cohesive dark UI.
 // @author      Max
 // @match       https://www.skill-capped.com/*
 // @require     https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js
@@ -839,6 +839,32 @@
       else localStorage.setItem(k, String(v));
     } catch (e) {}
   }
+  function dismissModal() {
+    var bg = document.querySelector('[data-name="Modal Background"]');
+    if (bg) bg.remove();
+  }
+  function hijackSyllabusButtons() {
+    var rows = document.querySelectorAll(LESSON_ROW_SEL);
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].dataset.scHijacked) continue;
+      rows[i].dataset.scHijacked = "true";
+      (function (btn) {
+        btn.addEventListener(
+          "click",
+          function (e) {
+            var info = parseLessonRow(btn);
+            if (!info.id) return; // let site handle it
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showPlayer(info.id, info.title);
+          },
+          true,
+        ); // capture phase — fires before React's handler
+      })(rows[i]);
+    }
+  }
+
   function load(k, def) {
     try {
       var v = localStorage.getItem(k);
@@ -1250,69 +1276,100 @@
   /* ─────────────────────────────────────────────
      PAGE DETECTION
   ───────────────────────────────────────────── */
+  var LESSON_ROW_SEL = "button[data-syllabus-lesson-row]";
+
+  /* Video ids show up embedded in thumbnail URLs in two shapes:
+       .../posters/{migration-folder}/{id}.jpg
+       .../videos/{id}/thumbnails/thumb_large....jpg */
+  function extractVideoIdFromImgSrc(src) {
+    if (!src) return null;
+    var m = src.match(/posters\/[^/]+\/([a-z0-9]+)\.[a-z]+/i);
+    if (m) return m[1];
+    m = src.match(/videos\/([a-z0-9]+)\/thumbnails\//i);
+    return m ? m[1] : null;
+  }
+
+  /* Lesson rows no longer expose title/id via dedicated attributes — both
+     are parsed from the row's aria-label and thumbnail src instead. */
+  function parseLessonRow(btn) {
+    var label = btn.getAttribute("aria-label") || "";
+    var m = label.match(
+      /^Lesson\s+\d+:\s*([\s\S]+?),\s*(\d{1,2}:\d{2})\.\s*(Current\s+)?/i,
+    );
+    var title = m ? m[1].trim() : (btn.textContent || "").trim();
+    var img = btn.querySelector("img");
+    return {
+      id: img ? extractVideoIdFromImgSrc(img.src) : null,
+      title: sanitize(title) || "Video",
+      current: btn.getAttribute("aria-current") === "step",
+      el: btn,
+    };
+  }
+
   function getVideoIdFromThumbnail() {
-    var img = document.querySelector('img[data-name="Video Poster"]');
+    var cur = document.querySelector(
+      LESSON_ROW_SEL + '[aria-current="step"] img',
+    );
+    if (cur) {
+      var id = extractVideoIdFromImgSrc(cur.src);
+      if (id) return id;
+    }
+    var img = document.querySelector(
+      '[data-player-object="true"] img[src*="/thumbnails/"]',
+    );
     if (img) {
-      var m = img.src.match(/thumbnails\/([a-z0-9]+)\//i);
-      if (m) return m[1];
+      var id2 = extractVideoIdFromImgSrc(img.src);
+      if (id2) return id2;
     }
     return null;
   }
   function getVideoIdFromUrl() {
     var m = window.location.pathname.match(/\/course\/([a-z0-9]+)/i);
     if (m) return m[1];
+    m = window.location.pathname.match(/\/commentaries\/([a-z0-9]+)/i);
+    if (m) return m[1];
     m = window.location.pathname.match(/\/video\/([a-z0-9]+)/i);
     return m ? m[1] : null;
   }
+  /* Commentary (VOD review) pages are a single video with no syllabus,
+     so they may not carry [data-player-object] — the URL alone is enough. */
+  function isVideoPage() {
+    return (
+      !!document.querySelector('[data-player-object="true"]') ||
+      /\/commentaries\/[a-z0-9]+/i.test(window.location.pathname)
+    );
+  }
   function getVideoTitle() {
-    var cc = document.querySelector(".current-video");
-    if (cc) {
-      var card = cc.closest('[data-name="CourseOverviewVidCard"]');
-      if (card) {
-        var td = card.querySelector(
-          'div[style*="font-weight: bold"][style*="font-size: 16px"]',
-        );
-        if (td && td.textContent.trim()) return sanitize(td.textContent.trim());
-      }
+    var cur = document.querySelector(LESSON_ROW_SEL + '[aria-current="step"]');
+    if (cur) {
+      var info = parseLessonRow(cur);
+      if (info.title) return info.title;
     }
-    var ir = document.querySelector('[data-name="Vid Info Row"]');
-    if (ir) {
-      var fc = ir.querySelector("div > div");
-      if (fc) {
-        var ww = fc.querySelectorAll("div > div:last-child"),
-          words = [];
-        for (var i = 0; i < ww.length; i++) {
-          var t = ww[i].textContent.trim();
-          if (t) words.push(t);
-        }
-        if (words.length) return sanitize(words.join(" "));
-      }
-    }
-    var ctb = document.querySelector('[data-name="CourseTitleBar"]');
-    if (ctb && ctb.textContent.trim()) return sanitize(ctb.textContent.trim());
+    var h2 = document.querySelector('[data-course-position="true"] + h2');
+    if (h2 && h2.textContent.trim()) return sanitize(h2.textContent.trim());
+    /* Commentary pages have no syllabus/heading element — fall back to
+       the tab title (SPA sets it to the video/commentary name). */
+    var docTitle = (document.title || "").split(/\s[|–-]\s/)[0].trim();
+    if (docTitle && !/skill.?capped/i.test(docTitle)) return sanitize(docTitle);
     return null;
   }
   function getCourseTitle() {
-    var el = document.querySelector('[data-name="CourseTitleBar"]');
-    return el ? el.textContent.trim() : "";
+    var h2 = document.querySelector('[data-course-position="true"] + h2');
+    return h2 ? h2.textContent.trim() : "";
   }
   function getAdjacentVideo(offset) {
-    var cards = document.querySelectorAll(
-        '[data-name="CourseOverviewVidCard"]',
-      ),
+    var rows = document.querySelectorAll(LESSON_ROW_SEL),
       idx = -1;
-    for (var i = 0; i < cards.length; i++) {
-      if (cards[i].querySelector(".current-video")) {
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute("aria-current") === "step") {
         idx = i;
         break;
       }
     }
     var target = idx + offset;
-    if (idx < 0 || target < 0 || target >= cards.length) return null;
-    var td = cards[target].querySelector(
-      'div[style*="font-weight: bold"][style*="font-size: 16px"]',
-    );
-    return { card: cards[target], title: td ? td.textContent.trim() : "Video" };
+    if (idx < 0 || target < 0 || target >= rows.length) return null;
+    var info = parseLessonRow(rows[target]);
+    return { card: rows[target], title: info.title, vid: info.id };
   }
   function navigateAndPlay(card) {
     card.click();
@@ -1360,18 +1417,15 @@
     var sidebar = document.createElement("div");
     sidebar.className = "sc-sidebar";
 
-    var cards = document.querySelectorAll(
-      '[data-name="CourseOverviewVidCard"]',
-    );
+    var cards = document.querySelectorAll(LESSON_ROW_SEL);
     var total = cards.length,
       watchedCount = 0;
     var epData = [];
     for (var i = 0; i < cards.length; i++) {
-      var td = cards[i].querySelector(
-        'div[style*="font-weight: bold"][style*="font-size: 16px"]',
-      );
-      var title = td ? td.textContent.trim() : "Episode " + (i + 1);
-      var vid = idFromTitle(title) || null;
+      var rowInfo = parseLessonRow(cards[i]);
+      var title = rowInfo.title || "Episode " + (i + 1);
+      var vid = rowInfo.id || idFromTitle(title) || null;
+      if (vid) mapTitle(title, vid);
       var watched = vid ? isWatched(vid) : false;
       var pos = vid ? getPos(vid) : 0;
       var dur = vid ? loadFloat("sc-dur-" + vid, 0) : 0;
@@ -1721,7 +1775,7 @@
     prevBtn.addEventListener("click", function () {
       var pv = getAdjacentVideo(-1);
       if (pv) {
-        var pid = idFromTitle(pv.title);
+        var pid = pv.vid || idFromTitle(pv.title);
         if (pid) loadVideo(pid, pv.title);
         else {
           doClose();
@@ -1738,7 +1792,7 @@
     nextBtn.addEventListener("click", function () {
       var nv = getAdjacentVideo(1);
       if (nv) {
-        var nid = idFromTitle(nv.title);
+        var nid = nv.vid || idFromTitle(nv.title);
         if (nid) loadVideo(nid, nv.title);
         else {
           doClose();
@@ -2048,14 +2102,13 @@
       if (sidebar._setActive) sidebar._setActive(newId);
 
       /* Also click the real SC card in the background so their state updates */
-      var cards = document.querySelectorAll(
-        '[data-name="CourseOverviewVidCard"]',
-      );
+      var cards = document.querySelectorAll(LESSON_ROW_SEL);
       for (var ci = 0; ci < cards.length; ci++) {
-        var td = cards[ci].querySelector(
-          'div[style*="font-weight: bold"][style*="font-size: 16px"]',
-        );
-        if (td && sanitize(td.textContent.trim()) === sanitize(newTitle)) {
+        var rowInfo = parseLessonRow(cards[ci]);
+        if (
+          rowInfo.id === newId ||
+          sanitize(rowInfo.title) === sanitize(newTitle)
+        ) {
           cards[ci].click();
           break;
         }
@@ -2265,7 +2318,7 @@
       if (e.key === "n" || e.key === "N") {
         var nv = getAdjacentVideo(1);
         if (nv) {
-          var nid = idFromTitle(nv.title);
+          var nid = nv.vid || idFromTitle(nv.title);
           if (nid) loadVideo(nid, nv.title);
           else {
             doClose();
@@ -2277,7 +2330,7 @@
       if (e.key === "p" || e.key === "P") {
         var pv = getAdjacentVideo(-1);
         if (pv) {
-          var pid = idFromTitle(pv.title);
+          var pid = pv.vid || idFromTitle(pv.title);
           if (pid) loadVideo(pid, pv.title);
           else {
             doClose();
@@ -2373,7 +2426,7 @@
               clearInterval(autoNextTimer);
               autoNextTimer = null;
             }
-            var gnid = idFromTitle(next.title);
+            var gnid = next.vid || idFromTitle(next.title);
             if (gnid) loadVideo(gnid, next.title);
             else {
               doClose();
@@ -2546,15 +2599,20 @@
   function startBulkDownload(btn, total) {
     if (bulkRunning) return;
     bulkRunning = true;
-    var cards = Array.from(
-      document.querySelectorAll('[data-name="CourseOverviewVidCard"]'),
-    );
+    /* Lesson rows expose their video id directly via the thumbnail src,
+       so episodes can be fetched by id without clicking through each card. */
+    var episodes = [];
+    var rows = document.querySelectorAll(LESSON_ROW_SEL);
+    for (var i = 0; i < rows.length; i++) {
+      var info = parseLessonRow(rows[i]);
+      episodes.push({ id: info.id, title: info.title });
+    }
     var current = 0,
       done = 0,
       failed = 0;
     btn.disabled = true;
     function next() {
-      if (current >= cards.length) {
+      if (current >= episodes.length) {
         bulkRunning = false;
         btn.textContent =
           "✓ " + done + " saved" + (failed ? ", " + failed + " failed" : "");
@@ -2567,58 +2625,43 @@
         }, 5000);
         return;
       }
-      btn.textContent = current + 1 + "/" + cards.length + " downloading…";
-      cards[current].click();
-      var attempts = 0,
-        lastId = getVideoIdFromThumbnail() || getVideoIdFromUrl();
-      var chk = setInterval(function () {
-        attempts++;
-        var newId = getVideoIdFromThumbnail() || getVideoIdFromUrl();
-        if (
-          (newId && newId !== lastId) ||
-          (attempts > 3 && newId) ||
-          attempts > 8
-        ) {
-          clearInterval(chk);
-          var videoId = getVideoIdFromThumbnail() || getVideoIdFromUrl();
-          if (!videoId) {
-            failed++;
-            current++;
-            next();
-            return;
-          }
-          var title = getVideoTitle() || videoId;
-          mapTitle(title, videoId);
-          downloadSegments(videoId, function (cnt, tot) {
-            btn.textContent =
-              current +
-              1 +
-              "/" +
-              cards.length +
-              " · " +
-              cnt +
-              "/" +
-              tot +
-              " seg";
-          })
-            .then(function (chunks) {
-              if (chunks.length) {
-                saveBlob(
-                  new Blob(chunks, { type: "video/mp2t" }),
-                  title + ".ts",
-                );
-                done++;
-              } else failed++;
-              current++;
-              next();
-            })
-            .catch(function () {
-              failed++;
-              current++;
-              next();
-            });
-        }
-      }, 500);
+      var ep = episodes[current];
+      if (!ep.id) {
+        failed++;
+        current++;
+        next();
+        return;
+      }
+      btn.textContent = current + 1 + "/" + episodes.length + " downloading…";
+      mapTitle(ep.title, ep.id);
+      downloadSegments(ep.id, function (cnt, tot) {
+        btn.textContent =
+          current +
+          1 +
+          "/" +
+          episodes.length +
+          " · " +
+          cnt +
+          "/" +
+          tot +
+          " seg";
+      })
+        .then(function (chunks) {
+          if (chunks.length) {
+            saveBlob(
+              new Blob(chunks, { type: "video/mp2t" }),
+              ep.title + ".ts",
+            );
+            done++;
+          } else failed++;
+          current++;
+          next();
+        })
+        .catch(function () {
+          failed++;
+          current++;
+          next();
+        });
     }
     next();
   }
@@ -2631,7 +2674,7 @@
     old.forEach(function (el) {
       el.remove();
     });
-    if (!document.querySelector('[data-name="Video Player Container"]')) return;
+    if (!isVideoPage()) return;
     var videoId = getVideoIdFromThumbnail() || getVideoIdFromUrl();
     if (!videoId) return;
 
@@ -2690,20 +2733,20 @@
      INLINE BUTTONS (browse/course list)
   ───────────────────────────────────────────── */
   function addInlineButtons() {
-    var rows = document.querySelectorAll(
-      'div[data-name="BrVid Row Parent Course"]',
-    );
-    rows.forEach(function (div) {
-      if (div.querySelector(".sc-inline-btn")) return;
-      var rowEl = div.closest('div[id^="BrVidRow-"]');
-      if (!rowEl) return;
-      var videoId = rowEl.id.split("-")[1];
+    /* Browsing no longer has a flat per-video row list — every browse/
+       collection link is a course-level card that opens straight into
+       the first lesson + syllabus. Inline buttons attach to those cards. */
+    var cards = document.querySelectorAll('a[href*="/browse/course/"]');
+    cards.forEach(function (a) {
+      if (a.querySelector(".sc-inline-btn")) return;
+      var hrefMatch = a.getAttribute("href").match(/\/course\/([a-z0-9]+)/i);
+      var img =
+        a.querySelector('img[data-course-image="true"]') ||
+        a.querySelector("img");
+      var videoId =
+        (hrefMatch && hrefMatch[1]) || extractVideoIdFromImgSrc(img && img.src);
       if (!videoId) return;
-      var heart = div.querySelector('svg[data-name="Heart Icon"]');
-      if (heart && heart.parentNode) heart.parentNode.removeChild(heart);
-      var titleEl = div.querySelector(
-        'div[style*="font-weight: bold"],div[data-name*="Title"]',
-      );
+      var titleEl = a.querySelector("h3");
       var rowTitle =
         titleEl && titleEl.textContent.trim()
           ? sanitize(titleEl.textContent.trim())
@@ -2718,13 +2761,14 @@
         : pos > 5
           ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg> Resume'
           : '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg> Watch';
-      btn.addEventListener("click", function () {
+      btn.addEventListener("click", function (e) {
+        /* Card is a full-tile <a> — stop the site's own navigation */
+        e.preventDefault();
+        e.stopPropagation();
         showPlayer(videoId, rowTitle);
       });
-      var container = div.querySelector(
-        '[data-name="BrVid Fav Container Course"]',
-      );
-      if (container) container.appendChild(btn);
+      var infoBlock = titleEl ? titleEl.parentElement : a;
+      if (infoBlock) infoBlock.appendChild(btn);
     });
   }
 
@@ -2732,18 +2776,11 @@
      SIDEBAR DOTS (watched/progress indicators)
   ───────────────────────────────────────────── */
   function updateSidebarDots() {
-    var cards = document.querySelectorAll(
-      '[data-name="CourseOverviewVidCard"]',
-    );
+    var cards = document.querySelectorAll(LESSON_ROW_SEL);
     cards.forEach(function (card) {
-      var td = card.querySelector(
-        'div[style*="font-weight: bold"][style*="font-size: 16px"]',
-      );
-      if (!td) return;
-      var title = td.textContent.trim();
-      if (!title) return;
-      var vid = idFromTitle(title);
-      var ep = card.querySelector(".episode-indicator");
+      var info = parseLessonRow(card);
+      var vid = info.id;
+      var ep = card.querySelector(':scope > span[aria-hidden="true"]');
       if (!ep) return;
       var dot = card.querySelector(".sc-dl-sidebar-dot");
       var color = null,
@@ -2776,21 +2813,15 @@
   }
 
   function updateCourseProgressLabel() {
-    var cards = document.querySelectorAll(
-      '[data-name="CourseOverviewVidCard"]',
-    );
+    var cards = document.querySelectorAll(LESSON_ROW_SEL);
     if (!cards.length) return;
     var watched = 0,
       known = 0;
     cards.forEach(function (card) {
-      var td = card.querySelector(
-        'div[style*="font-weight: bold"][style*="font-size: 16px"]',
-      );
-      if (!td) return;
-      var id = idFromTitle(td.textContent.trim());
-      if (!id) return;
+      var info = parseLessonRow(card);
+      if (!info.id) return;
       known++;
-      if (isWatched(id)) watched++;
+      if (isWatched(info.id)) watched++;
     });
     var label = document.querySelector(".sc-dl-course-progress");
     if (!label) {
@@ -2798,11 +2829,10 @@
       label.className = "sc-dl-course-progress";
       label.style.cssText =
         "font-family:'Inter','Segoe UI',sans-serif;font-size:11px;color:#888;text-align:center;margin:6px 0;";
-      var overview = document.querySelector('[data-name="CourseOverview"]');
-      if (overview) {
-        var fc = overview.querySelector("div");
-        if (fc) fc.insertBefore(label, fc.firstChild);
-      }
+      var section = document.querySelector(
+        'section[aria-label="Current course"]',
+      );
+      if (section) section.insertBefore(label, section.firstChild);
     }
     if (label)
       label.textContent = known
@@ -2822,6 +2852,8 @@
   }
 
   function refresh() {
+    hijackSyllabusButtons();
+    dismissModal();
     updateFab();
     addInlineButtons();
     updateSidebarDots();
@@ -2839,7 +2871,7 @@
         setTimeout(refresh, 2500);
       }
       addInlineButtons();
-      var pe = !!document.querySelector('[data-name="Video Player Container"]');
+      var pe = isVideoPage();
       var be = !!document.querySelector(".sc-fab");
       if (pe && !be) updateFab();
       else if (!pe && be) {
@@ -2852,6 +2884,14 @@
       childList: true,
       subtree: true,
     });
+    new MutationObserver(function () {
+      var bg = document.querySelector('[data-name="Modal Background"]');
+      if (!bg) return;
+      var btn = bg.querySelector(
+        'button[aria-label*="Close"], button[aria-label*="Closing"]',
+      );
+      if (btn) btn.click();
+    }).observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === "loading")

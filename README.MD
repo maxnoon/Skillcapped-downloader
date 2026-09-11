@@ -552,3 +552,20 @@ The batch download approach was superseded by the sliding-window fetcher in v10.
 
 * Episode navigation no longer tears down and rebuilds the player overlay — when moving to the next or previous episode the video source is swapped in-place, keeping the overlay, controls, and state intact
 * Eliminates the visible flash and layout shift that occurred when the overlay was destroyed and recreated on each episode change
+
+---
+
+## v12.0 — Site Redesign Compatibility
+
+Skill-Capped replaced its `data-name`-attribute markup with hashed CSS-in-JS classes and a new syllabus/course-card layout. All DOM selectors were rewritten against the new structure:
+
+* **Player detection** — `[data-name="Video Player Container"]` → `[data-player-object="true"]`
+* **Video id extraction** — thumbnail URLs moved from `.../thumbnails/{id}/...` to two new shapes (`.../posters/{migration-folder}/{id}.jpg` and `.../videos/{id}/thumbnails/...`); both are now handled
+* **Episode sidebar** — `[data-name="CourseOverviewVidCard"]` → `button[data-syllabus-lesson-row]`; `.current-video` → `[aria-current="step"]`; title/duration parsed from the row's `aria-label` instead of a bold/16px styled `<div>`
+* **Bulk download simplified** — lesson rows now expose their real video id directly via the thumbnail, so bulk download fetches each episode by id instead of clicking through cards and polling for URL changes (faster and less fragile)
+* **Browse page** — the old flat per-video row list (`BrVid Row Parent Course`, `BrVidRow-{id}`) no longer exists; browsing now goes straight from a course-level card to the first lesson. Inline Watch/Resume buttons now attach to `a[href*="/browse/course/"]` course cards instead
+* Multi-lesson VOD review / smurf commentary *courses* reuse the same syllabus component as regular courses, so no separate handling was needed there
+* Standalone commentary videos (`/lol/commentaries/{id}` — a single VOD review with no episode list) are a distinct, simpler page: added `/commentaries/{id}` to video-id-from-URL detection and an `isVideoPage()` check that recognizes this URL pattern even without the `[data-player-object]` DOM marker, plus a `document.title` fallback for title extraction since there's no syllabus heading on this page
+* **Modal auto-dismiss** — the redesign introduced a `[data-name="Modal Background"]` popup that can appear over the page; it's now removed on refresh and force-closed (via its Close button, or removed directly) as soon as a `MutationObserver` sees it appear
+* **Syllabus click hijacking** — lesson rows are now full-page-navigation links in the new markup, so clicking one no longer opens the custom overlay on its own; a capture-phase click listener on each `button[data-syllabus-lesson-row]` intercepts the click before React's own handler runs and opens the custom player instead (falls back to the site's own navigation if a video id can't be resolved)
+* CDN/stream URLs are unchanged (`d13z5uuzt1wkbz.cloudfront.net`) — only the surrounding page markup changed
