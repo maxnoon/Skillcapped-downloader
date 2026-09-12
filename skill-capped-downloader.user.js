@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Skill-Capped Video Downloader
 // @namespace   http://tampermonkey.net/
-// @version     12.1
+// @version     12.2
 // @description Adapted to Skill-Capped's 2026 site redesign (data-name attributes replaced with hashed CSS-in-JS classes and new syllabus/course-card markup): floating mini-player bar, glassmorphic overlay, rich episode sidebar, keyboard shortcuts HUD, quality/speed controls, PiP, bulk download, resume — all in a cohesive dark UI.
 // @author      Max
 // @match       https://www.skill-capped.com/*
@@ -69,7 +69,7 @@
       .sc-fab {
         position: fixed;
         top: 14px;
-        left: 50px;
+        left: 280px;
         z-index: 2147483647;
         display: flex;
         align-items: center;
@@ -2771,13 +2771,14 @@
           ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg> Resume'
           : '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg> Watch';
       btn.addEventListener("click", function (e) {
-        /* Card is a full-tile <a> — stop the site's own navigation */
         e.preventDefault();
         e.stopPropagation();
         showPlayer(videoId, rowTitle);
       });
-      var infoBlock = titleEl ? titleEl.parentElement : a;
-      if (infoBlock) infoBlock.appendChild(btn);
+      // Position cleanly in bottom-right of the card
+      btn.style.cssText = "position:absolute;bottom:8px;right:8px;z-index:5;";
+      a.style.position = "relative";
+      a.appendChild(btn);
     });
   }
 
