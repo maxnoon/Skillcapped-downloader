@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Skill-Capped Video Downloader
 // @namespace   http://tampermonkey.net/
-// @version     12.0
+// @version     12.1
 // @description Adapted to Skill-Capped's 2026 site redesign (data-name attributes replaced with hashed CSS-in-JS classes and new syllabus/course-card markup): floating mini-player bar, glassmorphic overlay, rich episode sidebar, keyboard shortcuts HUD, quality/speed controls, PiP, bulk download, resume — all in a cohesive dark UI.
 // @author      Max
 // @match       https://www.skill-capped.com/*
@@ -841,7 +841,12 @@
   }
   function dismissModal() {
     var bg = document.querySelector('[data-name="Modal Background"]');
-    if (bg) bg.remove();
+    if (!bg) return;
+    var btn = bg.querySelector(
+      'button[aria-label*="Close"], button[aria-label*="Closing"]',
+    );
+    if (btn) btn.click();
+    else bg.remove();
   }
   function hijackSyllabusButtons() {
     var rows = document.querySelectorAll(LESSON_ROW_SEL);
@@ -852,6 +857,10 @@
         btn.addEventListener(
           "click",
           function (e) {
+            /* Synthetic clicks (card.click()) are dispatched internally to
+               sync the site's own state/navigation and must pass through
+               untouched — only real user clicks are isTrusted. */
+            if (!e.isTrusted) return;
             var info = parseLessonRow(btn);
             if (!info.id) return; // let site handle it
             e.preventDefault();
@@ -1294,7 +1303,7 @@
   function parseLessonRow(btn) {
     var label = btn.getAttribute("aria-label") || "";
     var m = label.match(
-      /^Lesson\s+\d+:\s*([\s\S]+?),\s*(\d{1,2}:\d{2})\.\s*(Current\s+)?/i,
+      /^Lesson\s+\d+:\s*([\s\S]+?),\s*(\d{1,2}(?::\d{2}){1,2})\.\s*(Current\s+)?/i,
     );
     var title = m ? m[1].trim() : (btn.textContent || "").trim();
     var img = btn.querySelector("img");
@@ -2029,15 +2038,15 @@
     });
     dlMp4.addEventListener("click", function () {
       dlDrop.className = "sc-dropdown";
-      startDownload(videoId, dlBtn, dlBar, "mp4");
+      startDownload(currentVideoId, dlBtn, dlBar, "mp4");
     });
     dlTs.addEventListener("click", function () {
       dlDrop.className = "sc-dropdown";
-      startDownload(videoId, dlBtn, dlBar, "ts");
+      startDownload(currentVideoId, dlBtn, dlBar, "ts");
     });
     dlM3u8.addEventListener("click", function () {
       dlDrop.className = "sc-dropdown";
-      var url = playlistUrl(videoId, currentRes);
+      var url = playlistUrl(currentVideoId, currentRes);
       navigator.clipboard.writeText(url).then(function () {
         toast(videoWrap, "URL copied!", true, 1500);
       });
@@ -2629,7 +2638,7 @@
       if (!ep.id) {
         failed++;
         current++;
-        next();
+        setTimeout(next, 0);
         return;
       }
       btn.textContent = current + 1 + "/" + episodes.length + " downloading…";
@@ -2871,6 +2880,7 @@
         setTimeout(refresh, 2500);
       }
       addInlineButtons();
+      dismissModal();
       var pe = isVideoPage();
       var be = !!document.querySelector(".sc-fab");
       if (pe && !be) updateFab();
@@ -2884,14 +2894,6 @@
       childList: true,
       subtree: true,
     });
-    new MutationObserver(function () {
-      var bg = document.querySelector('[data-name="Modal Background"]');
-      if (!bg) return;
-      var btn = bg.querySelector(
-        'button[aria-label*="Close"], button[aria-label*="Closing"]',
-      );
-      if (btn) btn.click();
-    }).observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === "loading")
