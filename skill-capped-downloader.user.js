@@ -1918,7 +1918,7 @@
             hlsInstance.destroy();
             hlsInstance = null;
           }
-          fetchPlaylist(videoId, q.res).then(function (pl) {
+          fetchPlaylist(currentVideoId, q.res).then(function (pl) {
             var blob = new Blob([pl.m3u8Text], {
               type: "application/vnd.apple.mpegurl",
             });
