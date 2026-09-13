@@ -78,8 +78,8 @@ Example:
 
 ### Course Navigation
 
-* Adds Watch/Resume buttons to video rows
-* Adds a floating Watch/Resume button on video pages
+* Adds Watch/Resume buttons to course cards on browse pages
+* Adds a floating Watch/Resume button on video/syllabus pages
 * Adds a bulk download button on course pages
 * Adds a course progress counter, for example:
 
@@ -576,3 +576,23 @@ Skill-Capped replaced its `data-name`-attribute markup with hashed CSS-in-JS cla
 * Removed a second, undebounced `MutationObserver` added for modal dismissal; merged into the existing single debounced observer (kept since v10.3) and consolidated with `dismissModal()`, which now tries the modal's own Close button before falling back to removing it directly
 * Duration parsing in `parseLessonRow()` now matches `H:MM:SS` as well as `MM:SS`
 * Bulk download no longer recurses synchronously when skipping an episode with no resolvable id
+
+---
+
+## v12.1 — Quality Switch Fix
+
+* Fixed the quality selector fetching the playlist for the video id captured when the player first opened (`videoId`) instead of the currently-playing video (`currentVideoId`); switching quality after navigating to another episode in the same overlay was loading the wrong video's playlist
+
+---
+
+## v12.2 — FAB & Inline Button Positioning
+
+* Moved the floating Watch/Resume button from `left: 50px` to `left: 280px` — it was overlapping the site's own back button
+* Inline Watch/Resume buttons on browse-page course cards are now positioned `absolute` in the card's bottom-right corner instead of being appended next to the title, which had made them shift around with title length and wrap awkwardly on some cards
+
+---
+
+## v12.3 — Syllabus Title & Button Overlap Fixes
+
+* **Wrong download filenames** — `parseLessonRow()` fell back to a lesson row's raw `textContent` whenever its `aria-label` didn't match the expected pattern; that text includes the row's aria-hidden episode-number badge with no separator, producing filenames like `The ADC Problem01.mp4` instead of `The ADC Problem.mp4`. The fallback now clones the row and strips all `[aria-hidden="true"]` elements (badge numbers, checkmarks) before reading the title
+* **Overlapping Watch buttons on syllabus pages** — inline Watch/Resume buttons target any `a[href*="/browse/course/"]`, which is also the href pattern used by the small course-number nav tabs above a multi-course syllabus (e.g. `01 02 03 04`); attaching a button to each tab piled overlapping "Watch" pills on top of each other. Inline buttons are now skipped entirely on video/syllabus pages — the floating action button already provides a single Watch/Resume/Rewatch pill there

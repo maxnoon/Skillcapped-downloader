@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Skill-Capped Video Downloader
 // @namespace   http://tampermonkey.net/
-// @version     12.2
+// @version     12.3
 // @description Adapted to Skill-Capped's 2026 site redesign (data-name attributes replaced with hashed CSS-in-JS classes and new syllabus/course-card markup): floating mini-player bar, glassmorphic overlay, rich episode sidebar, keyboard shortcuts HUD, quality/speed controls, PiP, bulk download, resume — all in a cohesive dark UI.
 // @author      Max
 // @match       https://www.skill-capped.com/*
@@ -1298,6 +1298,14 @@
     return m ? m[1] : null;
   }
 
+  /* aria-hidden badges (episode number, checkmarks) sit inside the row and
+     get swept into btn.textContent — strip them before using it as a title. */
+  function textExcludingAriaHidden(el) {
+    var clone = el.cloneNode(true);
+    var hidden = clone.querySelectorAll('[aria-hidden="true"]');
+    for (var i = 0; i < hidden.length; i++) hidden[i].remove();
+    return (clone.textContent || "").trim();
+  }
   /* Lesson rows no longer expose title/id via dedicated attributes — both
      are parsed from the row's aria-label and thumbnail src instead. */
   function parseLessonRow(btn) {
@@ -1305,7 +1313,7 @@
     var m = label.match(
       /^Lesson\s+\d+:\s*([\s\S]+?),\s*(\d{1,2}(?::\d{2}){1,2})\.\s*(Current\s+)?/i,
     );
-    var title = m ? m[1].trim() : (btn.textContent || "").trim();
+    var title = m ? m[1].trim() : textExcludingAriaHidden(btn);
     var img = btn.querySelector("img");
     return {
       id: img ? extractVideoIdFromImgSrc(img.src) : null,
@@ -2742,6 +2750,17 @@
      INLINE BUTTONS (browse/course list)
   ───────────────────────────────────────────── */
   function addInlineButtons() {
+    /* On a course/syllabus page the same '/browse/course/' href pattern is
+       reused by the small course-number nav tabs (01, 02, 03…) above the
+       syllabus, so attaching a button there piles overlapping "Watch"
+       pills on top of each other. The FAB already covers "Watch" for
+       video pages, so skip inline buttons there entirely. */
+    if (isVideoPage()) {
+      document.querySelectorAll(".sc-inline-btn").forEach(function (btn) {
+        btn.remove();
+      });
+      return;
+    }
     /* Browsing no longer has a flat per-video row list — every browse/
        collection link is a course-level card that opens straight into
        the first lesson + syllabus. Inline buttons attach to those cards. */
